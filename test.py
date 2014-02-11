@@ -1,85 +1,43 @@
+#!/usr/bin/env python
+
+import musicbrainzngs
 import sys
-import logging
-from musicbrainz2.webservice import Query, ArtistFilter, ArtistIncludes, WebServiceError
-import musicbrainz2.model as m
 
-logging.basicConfig()
-logger = logging.getLogger()
-logger.setLevel(logging.DEBUG)
+ARTIST_SCORE_TRESHOLD = 75
 
-if len(sys.argv) < 2:
-  print "Usage: test.py 'artist name'"
-  sys.exit(1)
+musicbrainzngs.set_useragent(
+    "zikster",
+    "0.0.1",
+    "https://github.com/Zikster/zikster/",
+)
 
-# Find artist from string
-q = Query()
-try:
-# Search for all artists matching the given name. Limit the results
-# to the 5 best matches. The offset parameter could be used to page
-# through the results.
-#
-  f = ArtistFilter(name=sys.argv[1], limit=5)
-  artistResults = q.getArtists(f)
-except WebServiceError, e:
-  print 'Error:', e
-  sys.exit(1)
-	
-# No error occurred, so display the results of the search. It consists of
-# ArtistResult objects, where each contains an artist.
-#
+def filter_artists(artists):
+  return [a for a in artists if int(a['ext:score']) >= ARTIST_SCORE_TRESHOLD]
 
-# We choose the one that matches above our threshold
-found_artist = None
-for result in artistResults:
-  if result.score > 75:
-    found_artist = result.artist
-    break
+def print_artist(artist):
+  print("{name} ({id})".format(name=artist['name'], id=artist['id']))
+  print_artist_releases(artist)
+  
+def print_artist_releases(artist):
+  for release_group in artist["release-group-list"]:
+    print("{title} ({type})".format(title=release_group["title"], type=release_group["type"]))
 
-try:
-# The result should include all official albums.
-#
-  inc = ArtistIncludes(releases=(m.Release.TYPE_OFFICIAL, m.Release.TYPE_ALBUM), tags=True, releaseGroups=True)
-  artist = q.getArtistById(found_artist.id, inc)
-except WebServiceError, e:
-  print 'Error:', e
-  sys.exit(1)
+if __name__ == '__main__':
+  args = sys.argv[1:]
+  if len(args) != 1:
+    sys.exit("usage: {} ARTIST".format(sys.argv[0]))
+  artist = args
 
-print "Id         :", artist.id
-print "Name       :", artist.name
-print "SortName   :", artist.sortName
-print "UniqueName :", artist.getUniqueName()
-print "Type       :", artist.type
-print "BeginDate  :", artist.beginDate
-print "EndDate    :", artist.endDate
-print "Tags       :", ', '.join([t.value for t in artist.tags])
-print
-
-if len(artist.getReleases()) == 0:
-  print "No releases found."
-else:
-  print "Releases:"
-
-for release in artist.getReleases():
-  print
-  print "Id        :", release.id
-  print "Title     :", release.title
-  print "ASIN      :", release.asin
-  print "Text      :", release.textLanguage, '/', release.textScript
-  print "Types     :", release.types
-
-print
-
-if len(artist.getReleaseGroups()) == 0:
-  print
-  print "No release groups found."
-else:
-  print
-  print "Release groups:"
-
-for rg in artist.getReleaseGroups():
-  print
-  print "Id        :", rg.id
-  print "Title     :", rg.title
-  print "Type      :", rg.type
-
-print
+  # We need to search for the artist first to get the artist's id
+  result = musicbrainzngs.search_artists(artist=artist, type='group')
+  
+  # Here we filter the list to have a matching artist
+  artists = filter_artists(result['artist-list'])
+  
+  # Then, we need to fetch the artist's releases
+  artist_list = []
+  for a in artists:
+    artist_list.append(musicbrainzngs.get_artist_by_id(a['id'], includes=["release-groups"], release_type=["album","ep"]))
+    
+  for a in artist_list:
+    print_artist(a['artist'])
